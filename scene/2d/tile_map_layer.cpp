@@ -72,6 +72,9 @@ void TileMapLayer::_debug_update(bool p_force_cleanup) {
 			if (debug_quadrant->canvas_item.is_valid()) {
 				rs->free(debug_quadrant->canvas_item);
 			}
+			if (debug_quadrant->physics_mesh.is_valid()) {
+				rs->free(debug_quadrant->physics_mesh);
+			}
 		}
 		debug_quadrant_map.clear();
 		_debug_was_cleaned_up = true;
@@ -113,8 +116,7 @@ void TileMapLayer::_debug_update(bool p_force_cleanup) {
 		}
 	}
 
-	// Update those quadrants.
-	bool needs_set_not_interpolated = is_inside_tree() && get_tree()->is_physics_interpolation_enabled() && !is_physics_interpolated();
+	// Create new quadrants if needed.
 	for (const Vector2i &quadrant_coords : quadrants_to_updates) {
 		if (!debug_quadrant_map.has(quadrant_coords)) {
 			// Create a new quadrant and add it to the quadrant map.
@@ -123,7 +125,30 @@ void TileMapLayer::_debug_update(bool p_force_cleanup) {
 			new_quadrant->quadrant_coords = quadrant_coords;
 			debug_quadrant_map[quadrant_coords] = new_quadrant;
 		}
+	}
 
+	// Second pass on modified cells to update the list of cells per quandrant.
+	if (_debug_was_cleaned_up || anything_changed) {
+		for (KeyValue<Vector2i, CellData> &kv : tile_map_layer_data) {
+			CellData &cell_data = kv.value;
+			Ref<DebugQuadrant> debug_quadrant = debug_quadrant_map[_coords_to_quadrant_coords(cell_data.coords, TILE_MAP_DEBUG_QUADRANT_SIZE)];
+			if (!cell_data.debug_quadrant_list_element.in_list()) {
+				debug_quadrant->cells.add(&cell_data.debug_quadrant_list_element);
+			}
+		}
+	} else {
+		for (SelfList<CellData> *cell_data_list_element = dirty.cell_list.first(); cell_data_list_element; cell_data_list_element = cell_data_list_element->next()) {
+			CellData &cell_data = *cell_data_list_element->self();
+			Ref<DebugQuadrant> debug_quadrant = debug_quadrant_map[_coords_to_quadrant_coords(cell_data.coords, TILE_MAP_DEBUG_QUADRANT_SIZE)];
+			if (!cell_data.debug_quadrant_list_element.in_list()) {
+				debug_quadrant->cells.add(&cell_data.debug_quadrant_list_element);
+			}
+		}
+	}
+
+	// Update those quadrants.
+	bool needs_set_not_interpolated = is_inside_tree() && get_tree()->is_physics_interpolation_enabled() && !is_physics_interpolated();
+	for (const Vector2i &quadrant_coords : quadrants_to_updates) {
 		Ref<DebugQuadrant> debug_quadrant = debug_quadrant_map[quadrant_coords];
 
 		// Update the quadrant's canvas item.
@@ -816,6 +841,7 @@ void TileMapLayer::_physics_update(bool p_force_cleanup) {
 							physics_body_key.angular_velocity = angular_velocity;
 							physics_body_key.one_way_collision = tile_data->is_collision_polygon_one_way(tile_set_physics_layer, polygon_index);
 							physics_body_key.one_way_collision_margin = tile_data->get_collision_polygon_one_way_margin(tile_set_physics_layer, polygon_index);
+							physics_body_key.y_origin = map_to_local(cell_data.coords).y;
 
 							if (!physics_quadrant->bodies.has(physics_body_key)) {
 								RID body = ps->body_create();

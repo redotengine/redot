@@ -3427,11 +3427,9 @@ void TileMapLayerEditorTerrainsPlugin::_update_tiles_list() {
 							icon = atlas_source->get_texture();
 							region = atlas_source->get_tile_texture_region(cell.get_atlas_coords());
 							if (tile_data->get_flip_h()) {
-								region.position.x += region.size.x;
 								region.size.x = -region.size.x;
 							}
 							if (tile_data->get_flip_v()) {
-								region.position.y += region.size.y;
 								region.size.y = -region.size.y;
 							}
 							transpose = tile_data->get_transpose();
@@ -3665,6 +3663,12 @@ void TileMapLayerEditor::_notification(int p_what) {
 		case NOTIFICATION_EXIT_TREE: {
 			get_tree()->disconnect("node_added", callable_mp(this, &TileMapLayerEditor::_node_change));
 			get_tree()->disconnect("node_removed", callable_mp(this, &TileMapLayerEditor::_node_change));
+		} break;
+
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			if (custom_overlay) {
+				custom_overlay->set_visible(is_visible_in_tree());
+			}
 		} break;
 
 		case NOTIFICATION_THEME_CHANGED: {

@@ -7,7 +7,7 @@ env:
   SCONS_FLAGS: >-
     dev_mode=yes
     module_text_server_fb_enabled=yes
-    "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.16.0/"
+    "accesskit_sdk_path=${{ github.workspace }}/accesskit-c-0.17.0/"
   GODOT_CPP_BRANCH: 4.4
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -111,16 +111,13 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Linux dependencies for tests
-        if: matrix.proj-test
+      - name: Setup dependencies
         run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-          sudo apt-get install mesa-vulkan-drivers
-
-      # TODO: Figure out somehow how to embed this one.
-      - name: wayland-scanner dependency
-        run: |
-          sudo apt-get install libwayland-bin
+          sudo apt-get update
+          sudo apt-get install libwayland-bin  # TODO: Figure out somehow how to embed this one.
+          if [ "${{ matrix.proj-test }}" == "true" ]; then
+            sudo apt-get install mesa-vulkan-drivers
+          fi
 
       - name: Free disk space on runner
         run: |
@@ -162,12 +159,12 @@ jobs:
         uses: dsaltares/fetch-gh-release-asset@1.1.2
         with:
           repo: AccessKit/accesskit-c
-          version: tags/0.16.0
-          file: accesskit-c-0.16.0.zip
-          target: accesskit-c-0.16.0/accesskit_c.zip
+          version: tags/0.17.0
+          file: accesskit-c-0.17.0.zip
+          target: accesskit-c-0.17.0/accesskit_c.zip
 
       - name: Extract pre-built AccessKit
-        run: unzip -o accesskit-c-0.16.0/accesskit_c.zip
+        run: unzip -o accesskit-c-0.17.0/accesskit_c.zip
 
       - name: Install mold linker
         if: matrix.proj-test
