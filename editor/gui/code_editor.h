@@ -169,10 +169,9 @@ class CodeTextEditor : public VBoxContainer {
 	Button *warning_button = nullptr;
 
 	MenuButton *zoom_button = nullptr;
-	Label *line_and_col_txt = nullptr;
+	Button *line_and_col_button = nullptr;
 	Label *indentation_txt = nullptr;
 
-	Label *info = nullptr;
 	Timer *idle = nullptr;
 	float idle_time = 0.0f;
 	float idle_time_with_errors = 0.0f;
@@ -209,6 +208,8 @@ class CodeTextEditor : public VBoxContainer {
 	void _zoom_in();
 	void _zoom_out();
 	void _zoom_to(float p_zoom_factor);
+
+	void _show_goto_popup_request();
 
 	void _update_error_content_height();
 
@@ -297,7 +298,7 @@ public:
 
 	void validate_script();
 
-	void set_toggle_list_control(Control *p_control);
+	void set_toggle_list_control(Control *p_toggle_list_control);
 	void show_toggle_files_button();
 	void update_toggle_files_button();
 

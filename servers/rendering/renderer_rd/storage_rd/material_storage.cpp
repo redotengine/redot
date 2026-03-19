@@ -859,7 +859,7 @@ MaterialStorage::MaterialData::~MaterialData() {
 
 	for (int i = 0; i < 2; i++) {
 		if (uniform_buffer[i].is_valid()) {
-			RD::get_singleton()->free(uniform_buffer[i]);
+			RD::get_singleton()->free_rid(uniform_buffer[i]);
 		}
 	}
 }
@@ -994,25 +994,58 @@ void MaterialStorage::MaterialData::update_textures(const HashMap<StringName, Va
 						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_BLACK: {
 							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_BLACK);
 						} break;
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_TRANSPARENT: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_TRANSPARENT);
+						} break;
 						default: {
 							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_WHITE);
 						} break;
 					}
 				} break;
 				case ShaderLanguage::TYPE_SAMPLERCUBEARRAY: {
-					rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_BLACK);
+					switch (p_texture_uniforms[i].hint) {
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_WHITE: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_WHITE);
+						} break;
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_TRANSPARENT: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_TRANSPARENT);
+						} break;
+						default: { // previously this only had the black texture available. Keeping black as the default to minimize breaking anything.
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_CUBEMAP_ARRAY_BLACK);
+						} break;
+					}
 				} break;
 
 				case ShaderLanguage::TYPE_ISAMPLER3D:
 				case ShaderLanguage::TYPE_USAMPLER3D:
 				case ShaderLanguage::TYPE_SAMPLER3D: {
-					rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
+					switch (p_texture_uniforms[i].hint) {
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_BLACK: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_BLACK);
+						} break;
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_TRANSPARENT: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_TRANSPARENT);
+						} break;
+						default: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
+						} break;
+					}
 				} break;
 
 				case ShaderLanguage::TYPE_ISAMPLER2DARRAY:
 				case ShaderLanguage::TYPE_USAMPLER2DARRAY:
 				case ShaderLanguage::TYPE_SAMPLER2DARRAY: {
-					rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
+					switch (p_texture_uniforms[i].hint) {
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_BLACK: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
+						} break;
+						case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_TRANSPARENT: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_TRANSPARENT);
+						} break;
+						default: {
+							rd_texture = texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
+						} break;
+					}
 				} break;
 
 				default: {
@@ -1104,7 +1137,7 @@ void MaterialStorage::MaterialData::update_textures(const HashMap<StringName, Va
 void MaterialStorage::MaterialData::free_parameters_uniform_set(RID p_uniform_set) {
 	if (p_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(p_uniform_set)) {
 		RD::get_singleton()->uniform_set_set_invalidation_callback(p_uniform_set, nullptr, nullptr);
-		RD::get_singleton()->free(p_uniform_set);
+		RD::get_singleton()->free_rid(p_uniform_set);
 	}
 }
 
@@ -1112,7 +1145,7 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 	if ((uint32_t)ubo_data[p_use_linear_color].size() != p_ubo_size) {
 		p_uniform_dirty = true;
 		if (uniform_buffer[p_use_linear_color].is_valid()) {
-			RD::get_singleton()->free(uniform_buffer[p_use_linear_color]);
+			RD::get_singleton()->free_rid(uniform_buffer[p_use_linear_color]);
 			uniform_buffer[p_use_linear_color] = RID();
 		}
 
@@ -1125,7 +1158,7 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 		//clear previous uniform set
 		if (uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(uniform_set)) {
 			RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, nullptr, nullptr);
-			RD::get_singleton()->free(uniform_set);
+			RD::get_singleton()->free_rid(uniform_set);
 			uniform_set = RID();
 		}
 	}
@@ -1149,7 +1182,7 @@ bool MaterialStorage::MaterialData::update_parameters_uniform_set(const HashMap<
 		//clear previous uniform set
 		if (uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(uniform_set)) {
 			RD::get_singleton()->uniform_set_set_invalidation_callback(uniform_set, nullptr, nullptr);
-			RD::get_singleton()->free(uniform_set);
+			RD::get_singleton()->free_rid(uniform_set);
 			uniform_set = RID();
 		}
 	}
@@ -1208,6 +1241,178 @@ void MaterialStorage::MaterialData::set_as_used() {
 	for (int i = 0; i < render_target_cache.size(); i++) {
 		render_target_cache[i]->was_used = true;
 	}
+}
+
+/* TextureBlit SHADER */
+
+void MaterialStorage::TexBlitShaderData::set_code(const String &p_code) {
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	// Initialize and compile the shader.
+
+	code = p_code;
+	valid = false;
+	ubo_size = 0;
+	uniforms.clear();
+
+	if (code.is_empty()) {
+		return; // Just invalid, but no error.
+	}
+
+	ShaderCompiler::GeneratedCode gen_code;
+
+	// Actual enum set further down after compilation.
+	int blend_modei = BLEND_MODE_DISABLED;
+
+	ShaderCompiler::IdentifierActions actions;
+	actions.entry_point_stages["blit"] = ShaderCompiler::STAGE_FRAGMENT;
+
+	actions.render_mode_values["blend_add"] = Pair<int *, int>(&blend_modei, BLEND_MODE_ADD);
+	actions.render_mode_values["blend_mix"] = Pair<int *, int>(&blend_modei, BLEND_MODE_MIX);
+	actions.render_mode_values["blend_sub"] = Pair<int *, int>(&blend_modei, BLEND_MODE_SUB);
+	actions.render_mode_values["blend_mul"] = Pair<int *, int>(&blend_modei, BLEND_MODE_MUL);
+	actions.render_mode_values["blend_disabled"] = Pair<int *, int>(&blend_modei, BLEND_MODE_DISABLED);
+
+	actions.uniforms = &uniforms;
+	Error err = texture_storage->tex_blit_shader.compiler.compile(RS::SHADER_TEXTURE_BLIT, code, &actions, path, gen_code);
+	ERR_FAIL_COND_MSG(err != OK, "Shader compilation failed.");
+
+	if (version.is_null()) {
+		version = texture_storage->tex_blit_shader.shader.version_create();
+	}
+
+	blend_mode = BlendMode(blend_modei);
+
+#if 0
+	print_line("**compiling shader:");
+	print_line("**defines:\n");
+	for (int i = 0; i < gen_code.defines.size(); i++) {
+		print_line(gen_code.defines[i]);
+	}
+
+	HashMap<String, String>::Iterator el = gen_code.code.begin();
+	while (el) {
+		print_line("\n**code " + el->key + ":\n" + el->value);
+		++el;
+	}
+
+	print_line("\n**uniforms:\n" + gen_code.uniforms);
+	print_line("\n**vertex_globals:\n" + gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX]);
+	print_line("\n**fragment_globals:\n" + gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT]);
+#endif
+
+	texture_storage->tex_blit_shader.shader.version_set_code(version, gen_code.code, gen_code.uniforms, gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX], gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT], gen_code.defines);
+	ERR_FAIL_COND(!texture_storage->tex_blit_shader.shader.version_is_valid(version));
+
+	ubo_size = gen_code.uniform_total_size;
+	ubo_offsets = gen_code.uniform_offsets;
+	texture_uniforms = gen_code.texture_uniforms;
+
+	RD::PipelineColorBlendState blend_state_color_blend;
+	RD::PipelineColorBlendState::Attachment attachment;
+
+	// blend_mode_to_blend_attachment(blend_mode) does not work
+	// Because we want BlendAdd and BlendSub to behave differently for Texture_Blit
+	switch (blend_mode) {
+		case BLEND_MODE_MIX: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_SRC_ALPHA;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		} break;
+		case BLEND_MODE_ADD: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+		} break;
+		case BLEND_MODE_SUB: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+			attachment.color_blend_op = RD::BLEND_OP_REVERSE_SUBTRACT;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+		} break;
+		case BLEND_MODE_MUL: {
+			attachment.enable_blend = true;
+			attachment.alpha_blend_op = RD::BLEND_OP_ADD;
+			attachment.color_blend_op = RD::BLEND_OP_ADD;
+			attachment.src_color_blend_factor = RD::BLEND_FACTOR_DST_COLOR;
+			attachment.dst_color_blend_factor = RD::BLEND_FACTOR_ZERO;
+			attachment.src_alpha_blend_factor = RD::BLEND_FACTOR_DST_ALPHA;
+			attachment.dst_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+		} break;
+		case BLEND_MODE_DISABLED:
+		default: {
+			// Use default attachment values.
+		} break;
+	}
+
+	blend_state_color_blend.attachments = { attachment, attachment, attachment, attachment };
+
+	// Update Pipelines
+	for (int i = 0; i < 4; i++) {
+		RID shader_variant = texture_storage->tex_blit_shader.shader.version_get_shader(version, i);
+
+		pipelines[i].setup(shader_variant, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), blend_state_color_blend, 0);
+	}
+
+	valid = true;
+}
+
+bool MaterialStorage::TexBlitShaderData::is_animated() const {
+	return false;
+}
+
+bool MaterialStorage::TexBlitShaderData::casts_shadows() const {
+	return false;
+}
+
+RS::ShaderNativeSourceCode MaterialStorage::TexBlitShaderData::get_native_source_code() const {
+	return TextureStorage::get_singleton()->tex_blit_shader.shader.version_get_native_source_code(version);
+}
+
+Pair<ShaderRD *, RID> MaterialStorage::TexBlitShaderData::get_native_shader_and_version() const {
+	return { &TextureStorage::get_singleton()->tex_blit_shader.shader, version };
+}
+
+MaterialStorage::TexBlitShaderData::TexBlitShaderData() {
+	valid = false;
+}
+
+MaterialStorage::TexBlitShaderData::~TexBlitShaderData() {
+	if (version.is_valid()) {
+		TextureStorage::get_singleton()->tex_blit_shader.shader.version_free(version);
+	}
+}
+
+MaterialStorage::ShaderData *MaterialStorage::_create_tex_blit_shader_func() {
+	MaterialStorage::TexBlitShaderData *shader_data = memnew(MaterialStorage::TexBlitShaderData);
+	return shader_data;
+}
+
+bool MaterialStorage::TexBlitMaterialData::update_parameters(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty) {
+	uniform_set_updated = true;
+
+	return update_parameters_uniform_set(p_parameters, p_uniform_dirty, p_textures_dirty, shader_data->uniforms, shader_data->ubo_offsets.ptr(), shader_data->texture_uniforms, shader_data->default_texture_params, shader_data->ubo_size, uniform_set, TextureStorage::get_singleton()->tex_blit_shader.shader.version_get_shader(shader_data->version, 0), 1, true, false);
+}
+
+MaterialStorage::TexBlitMaterialData::~TexBlitMaterialData() {
+	free_parameters_uniform_set(uniform_set);
+}
+
+MaterialStorage::MaterialData *MaterialStorage::_create_tex_blit_material_func(MaterialStorage::ShaderData *p_shader) {
+	MaterialStorage::TexBlitMaterialData *material_data = memnew(TexBlitMaterialData);
+	material_data->shader_data = static_cast<TexBlitShaderData *>(p_shader);
+	//update will happen later anyway so do nothing.
+	return material_data;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1295,11 +1500,11 @@ MaterialStorage::~MaterialStorage() {
 	memdelete_arr(global_shader_uniforms.buffer_values);
 	memdelete_arr(global_shader_uniforms.buffer_usage);
 	memdelete_arr(global_shader_uniforms.buffer_dirty_regions);
-	RD::get_singleton()->free(global_shader_uniforms.buffer);
+	RD::get_singleton()->free_rid(global_shader_uniforms.buffer);
 
 	// buffers
 
-	RD::get_singleton()->free(quad_index_buffer); //array gets freed as dependency
+	RD::get_singleton()->free_rid(quad_index_buffer); //array gets freed as dependency
 
 	//def samplers
 	samplers_rd_free(default_samplers);
@@ -2000,6 +2205,8 @@ void MaterialStorage::shader_set_code(RID p_shader, const String &p_code) {
 		new_type = SHADER_TYPE_SKY;
 	} else if (mode_string == "fog") {
 		new_type = SHADER_TYPE_FOG;
+	} else if (mode_string == "texture_blit") {
+		new_type = SHADER_TYPE_TEXTURE_BLIT;
 	} else {
 		new_type = SHADER_TYPE_MAX;
 	}
@@ -2506,7 +2713,7 @@ void MaterialStorage::samplers_rd_free(Samplers &p_samplers) const {
 	for (int i = 1; i < RS::CANVAS_ITEM_TEXTURE_FILTER_MAX; i++) {
 		for (int j = 1; j < RS::CANVAS_ITEM_TEXTURE_REPEAT_MAX; j++) {
 			if (p_samplers.rids[i][j].is_valid()) {
-				RD::get_singleton()->free(p_samplers.rids[i][j]);
+				RD::get_singleton()->free_rid(p_samplers.rids[i][j]);
 				p_samplers.rids[i][j] = RID();
 			}
 		}

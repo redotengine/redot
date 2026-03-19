@@ -32,6 +32,7 @@
 
 #include "embedded_process_macos.h"
 
+#include "core/input/input.h"
 #include "editor/editor_node.h"
 #include "editor/gui/window_wrapper.h"
 
@@ -131,8 +132,6 @@ void GameViewDebuggerMacOS::_init_capture_message_handlers() {
 	parse_message_handlers["game_view:mouse_set_mode"] = &GameViewDebuggerMacOS::_msg_mouse_set_mode;
 	parse_message_handlers["game_view:window_set_ime_active"] = &GameViewDebuggerMacOS::_msg_window_set_ime_active;
 	parse_message_handlers["game_view:window_set_ime_position"] = &GameViewDebuggerMacOS::_msg_window_set_ime_position;
-	parse_message_handlers["game_view:joy_start"] = &GameViewDebuggerMacOS::_msg_joy_start;
-	parse_message_handlers["game_view:joy_stop"] = &GameViewDebuggerMacOS::_msg_joy_stop;
 	parse_message_handlers["game_view:warp_mouse"] = &GameViewDebuggerMacOS::_msg_warp_mouse;
 }
 

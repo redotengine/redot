@@ -32,9 +32,10 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs.h"
+#include "core/os/main_loop.h"
 #include "scene/resources/theme.h"
 #include "scene/theme/theme_db.h"
-#include "servers/rendering_server.h"
+#include "servers/rendering/rendering_server.h"
 #include "thirdparty/misc/polypartition.h"
 
 #define PADDING_REF_SIZE 1024.0
@@ -372,7 +373,7 @@ PrimitiveMesh::PrimitiveMesh() {
 
 PrimitiveMesh::~PrimitiveMesh() {
 	ERR_FAIL_NULL(RenderingServer::get_singleton());
-	RenderingServer::get_singleton()->free(mesh);
+	RenderingServer::get_singleton()->free_rid(mesh);
 
 	ERR_FAIL_NULL(ProjectSettings::get_singleton());
 	ProjectSettings *project_settings = ProjectSettings::get_singleton();
@@ -440,9 +441,9 @@ void CapsuleMesh::create_mesh_array(Array &p_arr, const float radius, const floa
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	// Note, this has been aligned with our collision shape but I've left the descriptions as top/middle/bottom.
@@ -760,9 +761,9 @@ void BoxMesh::create_mesh_array(Array &p_arr, Vector3 size, int subdivide_w, int
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	// front + back
@@ -1103,9 +1104,9 @@ void CylinderMesh::create_mesh_array(Array &p_arr, float top_radius, float botto
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	thisrow = 0;
@@ -1439,9 +1440,9 @@ void PlaneMesh::_create_mesh_array(Array &p_arr) const {
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	/* top + bottom */
@@ -1654,9 +1655,9 @@ void PrismMesh::_create_mesh_array(Array &p_arr) const {
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	/* front + back */
@@ -2012,9 +2013,9 @@ void SphereMesh::create_mesh_array(Array &p_arr, float radius, float height, int
 	point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	thisrow = 0;
@@ -2223,9 +2224,9 @@ void TorusMesh::_create_mesh_array(Array &p_arr) const {
 	indices.reserve(rings * ring_segments * 6);
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	ERR_FAIL_COND_MSG(inner_radius == outer_radius, "Inner radius and outer radius cannot be the same.");
@@ -2526,9 +2527,9 @@ void TubeTrailMesh::_create_mesh_array(Array &p_arr) const {
 	int point = 0;
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	int thisrow = 0;
@@ -2776,7 +2777,7 @@ void TubeTrailMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cap_top"), "set_cap_top", "is_cap_top");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "cap_bottom"), "set_cap_bottom", "is_cap_bottom");
 
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_curve", "get_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, Curve::get_class_static()), "set_curve", "get_curve");
 }
 
 TubeTrailMesh::TubeTrailMesh() {
@@ -2901,9 +2902,9 @@ void RibbonTrailMesh::_create_mesh_array(Array &p_arr) const {
 	indices.reserve(total_segments * 6 * (shape == SHAPE_CROSS ? 2 : 1));
 
 #define ADD_TANGENT(m_x, m_y, m_z, m_d) \
-	tangents.push_back(m_x);            \
-	tangents.push_back(m_y);            \
-	tangents.push_back(m_z);            \
+	tangents.push_back(m_x); \
+	tangents.push_back(m_y); \
+	tangents.push_back(m_z); \
 	tangents.push_back(m_d);
 
 	for (int j = 0; j <= total_segments; j++) {
@@ -3026,7 +3027,7 @@ void RibbonTrailMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sections", PROPERTY_HINT_RANGE, "2,128,1"), "set_sections", "get_sections");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "section_length", PROPERTY_HINT_RANGE, "0.001,1024.0,0.001,or_greater,suffix:m"), "set_section_length", "get_section_length");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "section_segments", PROPERTY_HINT_RANGE, "1,128,1"), "set_section_segments", "get_section_segments");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_curve", "get_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, Curve::get_class_static()), "set_curve", "get_curve");
 
 	BIND_ENUM_CONSTANT(SHAPE_FLAT)
 	BIND_ENUM_CONSTANT(SHAPE_CROSS)
@@ -3226,8 +3227,9 @@ void TextMesh::_create_mesh_array(Array &p_arr) const {
 		TS->shaped_text_clear(text_rid);
 		TS->shaped_text_set_direction(text_rid, text_direction);
 
-		String txt = (uppercase) ? TS->string_to_upper(xl_text, language) : xl_text;
-		TS->shaped_text_add_string(text_rid, txt, font->get_rids(), font_size, font->get_opentype_features(), language);
+		const String &lang = language.is_empty() ? _get_locale() : language;
+		String txt = (uppercase) ? TS->string_to_upper(xl_text, lang) : xl_text;
+		TS->shaped_text_add_string(text_rid, txt, font->get_rids(), font_size, font->get_opentype_features(), lang);
 
 		TypedArray<Vector3i> stt;
 		if (st_parser == TextServer::STRUCTURED_TEXT_CUSTOM) {
@@ -3659,7 +3661,7 @@ void TextMesh::_bind_methods() {
 
 	ADD_GROUP("Text", "");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "text", PROPERTY_HINT_MULTILINE_TEXT, ""), "set_text", "get_text");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "font", PROPERTY_HINT_RESOURCE_TYPE, "Font"), "set_font", "get_font");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "font", PROPERTY_HINT_RESOURCE_TYPE, Font::get_class_static()), "set_font", "get_font");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "font_size", PROPERTY_HINT_RANGE, "1,256,1,or_greater,suffix:px"), "set_font_size", "get_font_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "horizontal_alignment", PROPERTY_HINT_ENUM, "Left,Center,Right,Fill"), "set_horizontal_alignment", "get_horizontal_alignment");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "vertical_alignment", PROPERTY_HINT_ENUM, "Top,Center,Bottom"), "set_vertical_alignment", "get_vertical_alignment");
@@ -3685,11 +3687,8 @@ void TextMesh::_bind_methods() {
 void TextMesh::_notification(int p_what) {
 	switch (p_what) {
 		case MainLoop::NOTIFICATION_TRANSLATION_CHANGED: {
-			String new_text = tr(text);
-			if (new_text == xl_text) {
-				return; // Nothing new.
-			}
-			xl_text = new_text;
+			// Language update might change the appearance of some characters.
+			xl_text = tr(text);
 			dirty_text = true;
 			request_update();
 		} break;
@@ -3952,16 +3951,16 @@ TextServer::StructuredTextParser TextMesh::get_structured_text_bidi_override() c
 	return st_parser;
 }
 
-void TextMesh::set_structured_text_bidi_override_options(Array p_args) {
+void TextMesh::set_structured_text_bidi_override_options(const Array &p_args) {
 	if (st_args != p_args) {
-		st_args = p_args;
+		st_args = Array(p_args);
 		dirty_text = true;
 		request_update();
 	}
 }
 
 Array TextMesh::get_structured_text_bidi_override_options() const {
-	return st_args;
+	return Array(st_args);
 }
 
 void TextMesh::set_uppercase(bool p_uppercase) {

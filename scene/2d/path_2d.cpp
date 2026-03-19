@@ -32,6 +32,7 @@
 
 #include "core/math/geometry_2d.h"
 #include "scene/main/timer.h"
+#include "scene/resources/mesh.h"
 
 #ifdef TOOLS_ENABLED
 #include "editor/themes/editor_scale.h"
@@ -127,11 +128,11 @@ void Path2D::_debug_free() {
 	ERR_FAIL_NULL(RS::get_singleton());
 
 	if (debug_instance.is_valid()) {
-		RS::get_singleton()->free(debug_instance);
+		RS::get_singleton()->free_rid(debug_instance);
 		debug_instance = RID();
 	}
 	if (debug_mesh_rid.is_valid()) {
-		RS::get_singleton()->free(debug_mesh_rid);
+		RS::get_singleton()->free_rid(debug_mesh_rid);
 		debug_mesh_rid = RID();
 	}
 }
@@ -289,7 +290,7 @@ void Path2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_curve", "curve"), &Path2D::set_curve);
 	ClassDB::bind_method(D_METHOD("get_curve"), &Path2D::get_curve);
 
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve2D", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_EDITOR_INSTANTIATE_OBJECT), "set_curve", "get_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, Curve2D::get_class_static(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_EDITOR_INSTANTIATE_OBJECT), "set_curve", "get_curve");
 }
 
 /////////////////////////////////////////////////////////////////////////////////

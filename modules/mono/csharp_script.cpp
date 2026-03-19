@@ -55,12 +55,12 @@
 #include "core/os/mutex.h"
 #include "core/os/os.h"
 #include "core/os/thread.h"
-#include "servers/text_server.h"
+#include "servers/text/text_server.h"
 
 #ifdef TOOLS_ENABLED
 #include "core/os/keyboard.h"
 #include "editor/docks/inspector_dock.h"
-#include "editor/docks/node_dock.h"
+#include "editor/docks/signals_dock.h"
 #include "editor/editor_node.h"
 #include "editor/file_system/editor_file_system.h"
 #include "editor/settings/editor_settings.h"
@@ -398,10 +398,6 @@ String CSharpLanguage::validate_path(const String &p_path) const {
 	}
 
 	return "";
-}
-
-Script *CSharpLanguage::create_script() const {
-	return memnew(CSharpScript);
 }
 
 bool CSharpLanguage::supports_builtin_mode() const {
@@ -1026,7 +1022,7 @@ void CSharpLanguage::reload_assemblies(bool p_soft_reload) {
 	// FIXME: Hack to refresh editor in order to display new properties and signals. See if there is a better alternative.
 	if (Engine::get_singleton()->is_editor_hint()) {
 		InspectorDock::get_inspector_singleton()->update_tree();
-		NodeDock::get_singleton()->update_lists();
+		SignalsDock::get_singleton()->update_lists();
 	}
 #endif
 }
@@ -1432,7 +1428,7 @@ void CSharpLanguage::tie_user_managed_to_unmanaged(GCHandleIntPtr p_gchandle_int
 
 	CSharpInstance *csharp_instance = CSharpInstance::create_for_managed_type(p_unmanaged, script.ptr(), gchandle);
 
-	p_unmanaged->set_script_and_instance(script, csharp_instance);
+	p_unmanaged->set_script_instance(csharp_instance);
 
 	csharp_instance->connect_event_signals();
 }
@@ -2892,7 +2888,7 @@ bool ResourceFormatLoaderCSharpScript::handles_type(const String &p_type) const 
 }
 
 String ResourceFormatLoaderCSharpScript::get_resource_type(const String &p_path) const {
-	return p_path.get_extension().to_lower() == "cs" ? CSharpLanguage::get_singleton()->get_type() : "";
+	return p_path.has_extension("cs") ? CSharpLanguage::get_singleton()->get_type() : "";
 }
 
 Error ResourceFormatSaverCSharpScript::save(const Ref<Resource> &p_resource, const String &p_path, uint32_t p_flags) {

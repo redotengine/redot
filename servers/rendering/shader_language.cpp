@@ -32,10 +32,11 @@
 
 #include "core/os/os.h"
 #include "core/templates/local_vector.h"
+#include "core/templates/rb_set.h"
 #include "servers/rendering/renderer_compositor.h"
+#include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
-#include "servers/rendering_server.h"
-#include "shader_types.h"
+#include "servers/rendering/shader_types.h"
 
 #define HAS_WARNING(flag) (warning_flags & flag)
 
@@ -220,6 +221,10 @@ const char *ShaderLanguage::token_names[TK_MAX] = {
 	"HINT_SCREEN_TEXTURE",
 	"HINT_NORMAL_ROUGHNESS_TEXTURE",
 	"HINT_DEPTH_TEXTURE",
+	"HINT_BLIT_SOURCE0",
+	"HINT_BLIT_SOURCE1",
+	"HINT_BLIT_SOURCE2",
+	"HINT_BLIT_SOURCE3",
 	"FILTER_NEAREST",
 	"FILTER_LINEAR",
 	"FILTER_NEAREST_MIPMAP",
@@ -391,6 +396,11 @@ const ShaderLanguage::KeyWord ShaderLanguage::keyword_list[] = {
 	{ TK_HINT_SCREEN_TEXTURE, "hint_screen_texture", CF_UNSPECIFIED, {}, {} },
 	{ TK_HINT_NORMAL_ROUGHNESS_TEXTURE, "hint_normal_roughness_texture", CF_UNSPECIFIED, {}, {} },
 	{ TK_HINT_DEPTH_TEXTURE, "hint_depth_texture", CF_UNSPECIFIED, {}, {} },
+
+	{ TK_HINT_BLIT_SOURCE0, "hint_blit_source0", CF_UNSPECIFIED, {}, {} },
+	{ TK_HINT_BLIT_SOURCE1, "hint_blit_source1", CF_UNSPECIFIED, {}, {} },
+	{ TK_HINT_BLIT_SOURCE2, "hint_blit_source2", CF_UNSPECIFIED, {}, {} },
+	{ TK_HINT_BLIT_SOURCE3, "hint_blit_source3", CF_UNSPECIFIED, {}, {} },
 
 	{ TK_FILTER_NEAREST, "filter_nearest", CF_UNSPECIFIED, {}, {} },
 	{ TK_FILTER_LINEAR, "filter_linear", CF_UNSPECIFIED, {}, {} },
@@ -1236,6 +1246,18 @@ String ShaderLanguage::get_uniform_hint_name(ShaderNode::Uniform::Hint p_hint) {
 		case ShaderNode::Uniform::HINT_DEPTH_TEXTURE: {
 			result = "hint_depth_texture";
 		} break;
+		case ShaderNode::Uniform::HINT_BLIT_SOURCE0: {
+			result = "hint_blit_source0";
+		} break;
+		case ShaderNode::Uniform::HINT_BLIT_SOURCE1: {
+			result = "hint_blit_source1";
+		} break;
+		case ShaderNode::Uniform::HINT_BLIT_SOURCE2: {
+			result = "hint_blit_source2";
+		} break;
+		case ShaderNode::Uniform::HINT_BLIT_SOURCE3: {
+			result = "hint_blit_source3";
+		} break;
 		default:
 			break;
 	}
@@ -1555,10 +1577,11 @@ bool ShaderLanguage::_find_identifier(const BlockNode *p_block, bool p_allow_rea
 	return false;
 }
 
-bool ShaderLanguage::_validate_operator(const BlockNode *p_block, const FunctionInfo &p_function_info, OperatorNode *p_op, DataType *r_ret_type, int *r_ret_size) {
+bool ShaderLanguage::_validate_operator(const BlockNode *p_block, const FunctionInfo &p_function_info, OperatorNode *p_op, DataType *r_ret_type, int *r_ret_size, StringName *r_ret_struct_name) {
 	bool valid = false;
 	DataType ret_type = TYPE_VOID;
 	int ret_size = 0;
+	String ret_struct_name;
 
 	switch (p_op->op) {
 		case OP_EQUAL:
@@ -2003,7 +2026,23 @@ bool ShaderLanguage::_validate_operator(const BlockNode *p_block, const Function
 			DataType nb = p_op->arguments[1]->get_datatype();
 			DataType nc = p_op->arguments[2]->get_datatype();
 
-			valid = na == TYPE_BOOL && (nb == nc) && !is_sampler_type(nb);
+			bool is_same = false;
+			if (nb == nc) {
+				is_same = true;
+
+				if (nb == TYPE_STRUCT) {
+					String tb = p_op->arguments[1]->get_datatype_name();
+					String tc = p_op->arguments[2]->get_datatype_name();
+
+					if (tb != tc) {
+						break;
+					}
+
+					ret_struct_name = tb;
+				}
+			}
+
+			valid = na == TYPE_BOOL && is_same && !is_sampler_type(nb);
 			ret_type = nb;
 			ret_size = sa;
 		} break;
@@ -2017,6 +2056,9 @@ bool ShaderLanguage::_validate_operator(const BlockNode *p_block, const Function
 	}
 	if (r_ret_size) {
 		*r_ret_size = ret_size;
+	}
+	if (r_ret_struct_name) {
+		*r_ret_struct_name = ret_struct_name;
 	}
 
 	if (valid && (!p_block || p_block->use_op_eval)) {
@@ -3605,8 +3647,36 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 	int builtin_idx = 0;
 
 	if (argcount <= 4) {
-		// test builtins
+		// Test builtins.
 		int idx = 0;
+		int full_match_index = 0;
+
+		while (builtin_func_defs[idx].name) {
+			if (completion_class != builtin_func_defs[idx].tag) {
+				idx++;
+				continue;
+			}
+
+			if (name == builtin_func_defs[idx].name) {
+				bool fail = false;
+
+				for (int i = 0; i < argcount; i++) {
+					if (args[i] != builtin_func_defs[idx].args[i]) {
+						fail = true;
+						break;
+					}
+				}
+
+				if (!fail) {
+					// Full match.
+					full_match_index = idx;
+					break;
+				}
+			}
+
+			idx++;
+		}
+		idx = full_match_index;
 
 		while (builtin_func_defs[idx].name) {
 			if (completion_class != builtin_func_defs[idx].tag) {
@@ -3626,7 +3696,7 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 						}
 					}
 					if (get_scalar_type(args[i]) == args[i] && p_func->arguments[i + 1]->type == Node::NODE_TYPE_CONSTANT && convert_constant(static_cast<ConstantNode *>(p_func->arguments[i + 1]), builtin_func_defs[idx].args[i])) {
-						//all good, but needs implicit conversion later
+						// All good, but needs implicit conversion later.
 					} else if (args[i] != builtin_func_defs[idx].args[i]) {
 						fail = true;
 						break;
@@ -3644,7 +3714,7 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 				}
 
 				if (!fail && argcount < 4 && builtin_func_defs[idx].args[argcount] != TYPE_VOID) {
-					fail = true; //make sure the number of arguments matches
+					fail = true; // Make sure the number of arguments matches.
 				}
 
 				if (!fail) {
@@ -3679,7 +3749,7 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 						}
 					}
 
-					//make sure its not an out argument used in the wrong way
+					// Make sure it's not an out argument used in the wrong way.
 					int outarg_idx = 0;
 					while (builtin_func_out_args[outarg_idx].name) {
 						if (String(name) == builtin_func_out_args[outarg_idx].name) {
@@ -3778,14 +3848,14 @@ bool ShaderLanguage::_validate_function_call(BlockNode *p_block, const FunctionI
 						}
 						outarg_idx++;
 					}
-					//implicitly convert values if possible
+					// Implicitly convert values if possible.
 					for (int i = 0; i < argcount; i++) {
 						if (get_scalar_type(args[i]) != args[i] || args[i] == builtin_func_defs[idx].args[i] || p_func->arguments[i + 1]->type != Node::NODE_TYPE_CONSTANT) {
-							//can't do implicit conversion here
+							// Can't do implicit conversion here.
 							continue;
 						}
 
-						//this is an implicit conversion
+						// This is an implicit conversion.
 						ConstantNode *constant = static_cast<ConstantNode *>(p_func->arguments[i + 1]);
 						ConstantNode *conversion = alloc_node<ConstantNode>();
 
@@ -4726,8 +4796,8 @@ Variant ShaderLanguage::get_default_datatype_value(DataType p_type, int p_array_
 				}
 				value = Variant(array);
 			} else {
-				VariantInitializer<float>::init(&value);
-				VariantDefaultInitializer<float>::init(&value);
+				VariantInitializer<double>::init(&value);
+				VariantDefaultInitializer<double>::init(&value);
 			}
 			break;
 		case ShaderLanguage::TYPE_VEC2:
@@ -5282,7 +5352,7 @@ ShaderLanguage::DataType ShaderLanguage::get_scalar_type(DataType p_type) {
 		TYPE_VOID,
 	};
 
-	static_assert(std::size(scalar_types) == TYPE_MAX);
+	static_assert(std_size(scalar_types) == TYPE_MAX);
 
 	return scalar_types[p_type];
 }
@@ -5324,7 +5394,7 @@ int ShaderLanguage::get_cardinality(DataType p_type) {
 		1,
 	};
 
-	static_assert(std::size(cardinality_table) == TYPE_MAX);
+	static_assert(std_size(cardinality_table) == TYPE_MAX);
 
 	return cardinality_table[p_type];
 }
@@ -6453,7 +6523,7 @@ ShaderLanguage::Node *ShaderLanguage::_parse_expression(BlockNode *p_block, cons
 												ShaderNode::Uniform::Hint hint = u->hint;
 
 												if (hint == ShaderNode::Uniform::HINT_DEPTH_TEXTURE || hint == ShaderNode::Uniform::HINT_SCREEN_TEXTURE || hint == ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
-													_set_error(vformat(RTR("Unable to pass a multiview texture sampler as a parameter to custom function. Consider to sample it in the main function and then pass the vector result to it."), get_uniform_hint_name(hint)));
+													_set_error(vformat(RTR("Unable to pass a multiview texture sampler as a parameter to a custom function. Consider sampling it in the main function and then passing the vector result to the custom function."), get_uniform_hint_name(hint)));
 													return nullptr;
 												}
 											}
@@ -6463,6 +6533,11 @@ ShaderLanguage::Node *ShaderLanguage::_parse_expression(BlockNode *p_block, cons
 												return nullptr;
 											}
 										} else if (p_function_info.built_ins.has(varname)) {
+											if (is_custom_func && varname == SNAME("RADIANCE")) {
+												_set_error(RTR("Unable to pass RADIANCE texture sampler as a parameter to a custom function. Consider sampling it in the main function and then passing the vector result to the custom function."));
+												return nullptr;
+											}
+
 											//a built-in
 											if (!_propagate_function_call_sampler_builtin_reference(name, i, varname)) {
 												return nullptr;
@@ -7699,7 +7774,7 @@ ShaderLanguage::Node *ShaderLanguage::_parse_expression(BlockNode *p_block, cons
 
 			expression.write[next_op - 1].is_op = false;
 			expression.write[next_op - 1].node = op;
-			if (!_validate_operator(p_block, p_function_info, op, &op->return_cache, &op->return_array_size)) {
+			if (!_validate_operator(p_block, p_function_info, op, &op->return_cache, &op->return_array_size, &op->struct_name)) {
 				if (error_set) {
 					return nullptr;
 				}
@@ -7709,7 +7784,12 @@ ShaderLanguage::Node *ShaderLanguage::_parse_expression(BlockNode *p_block, cons
 					if (i > 0) {
 						at += ", ";
 					}
-					at += get_datatype_name(op->arguments[i]->get_datatype());
+					DataType dt = op->arguments[i]->get_datatype();
+					if (dt == TYPE_STRUCT) {
+						at += op->arguments[i]->get_datatype_name();
+					} else {
+						at += get_datatype_name(dt);
+					}
 					if (!op->arguments[i]->is_indexed() && op->arguments[i]->get_array_size() > 0) {
 						at += "[";
 						at += itos(op->arguments[i]->get_array_size());
@@ -9195,8 +9275,8 @@ Error ShaderLanguage::_parse_shader(const HashMap<StringName, FunctionInfo> &p_f
 
 	stages = &p_functions;
 
-	is_discard_supported = shader_type_identifier == "canvas_item" || shader_type_identifier == "spatial";
-	is_supported_frag_only_funcs = is_discard_supported || shader_type_identifier == "sky";
+	is_discard_supported = shader_type_identifier == "canvas_item" || shader_type_identifier == "spatial" || shader_type_identifier == StringName();
+	is_supported_frag_only_funcs = is_discard_supported || shader_type_identifier == "sky" || shader_type_identifier == StringName();
 
 	const FunctionInfo &constants = p_functions.has("constants") ? p_functions["constants"] : FunctionInfo();
 
@@ -9996,6 +10076,42 @@ Error ShaderLanguage::_parse_shader(const HashMap<StringName, FunctionInfo> &p_f
 									--texture_binding;
 									if (shader_type_identifier != StringName() && String(shader_type_identifier) != "spatial") {
 										_set_error(vformat(RTR("'hint_depth_texture' is not supported in '%s' shaders."), shader_type_identifier));
+										return ERR_PARSE_ERROR;
+									}
+								} break;
+								case TK_HINT_BLIT_SOURCE0: {
+									new_hint = ShaderNode::Uniform::HINT_BLIT_SOURCE0;
+									--texture_uniforms;
+									--texture_binding;
+									if (shader_type_identifier != StringName() && String(shader_type_identifier) != "texture_blit") {
+										_set_error(vformat(RTR("'hint_blit_source' is not supported in '%s' shaders."), shader_type_identifier));
+										return ERR_PARSE_ERROR;
+									}
+								} break;
+								case TK_HINT_BLIT_SOURCE1: {
+									new_hint = ShaderNode::Uniform::HINT_BLIT_SOURCE1;
+									--texture_uniforms;
+									--texture_binding;
+									if (shader_type_identifier != StringName() && String(shader_type_identifier) != "texture_blit") {
+										_set_error(vformat(RTR("'hint_blit_source' is not supported in '%s' shaders."), shader_type_identifier));
+										return ERR_PARSE_ERROR;
+									}
+								} break;
+								case TK_HINT_BLIT_SOURCE2: {
+									new_hint = ShaderNode::Uniform::HINT_BLIT_SOURCE2;
+									--texture_uniforms;
+									--texture_binding;
+									if (shader_type_identifier != StringName() && String(shader_type_identifier) != "texture_blit") {
+										_set_error(vformat(RTR("'hint_blit_source' is not supported in '%s' shaders."), shader_type_identifier));
+										return ERR_PARSE_ERROR;
+									}
+								} break;
+								case TK_HINT_BLIT_SOURCE3: {
+									new_hint = ShaderNode::Uniform::HINT_BLIT_SOURCE3;
+									--texture_uniforms;
+									--texture_binding;
+									if (shader_type_identifier != StringName() && String(shader_type_identifier) != "texture_blit") {
+										_set_error(vformat(RTR("'hint_blit_source' is not supported in '%s' shaders."), shader_type_identifier));
 										return ERR_PARSE_ERROR;
 									}
 								} break;
@@ -11369,7 +11485,7 @@ Error ShaderLanguage::complete(const String &p_code, const ShaderCompileInfo &p_
 #ifdef DEBUG_ENABLED
 	// Adds context keywords.
 	if (keyword_completion_context != CF_UNSPECIFIED) {
-		constexpr int sz = std::size(keyword_list);
+		constexpr int sz = std_size(keyword_list);
 		for (int i = 0; i < sz; i++) {
 			if (keyword_list[i].flags == CF_UNSPECIFIED) {
 				break; // Ignore hint keywords (parsed below).
@@ -11586,7 +11702,7 @@ Error ShaderLanguage::complete(const String &p_code, const ShaderCompileInfo &p_
 				if (comp_ident) {
 					if (is_shader_inc) {
 						for (int i = 0; i < RenderingServer::SHADER_MAX; i++) {
-							const HashMap<StringName, ShaderLanguage::FunctionInfo> info = ShaderTypes::get_singleton()->get_functions(RenderingServer::ShaderMode(i));
+							const HashMap<StringName, ShaderLanguage::FunctionInfo> &info = ShaderTypes::get_singleton()->get_functions(RenderingServer::ShaderMode(i));
 
 							if (info.has("global")) {
 								for (const KeyValue<StringName, BuiltInInfo> &E : info["global"].built_ins) {
@@ -12042,6 +12158,10 @@ Error ShaderLanguage::complete(const String &p_code, const ShaderCompileInfo &p_
 						options.push_back("hint_screen_texture");
 						options.push_back("hint_normal_roughness_texture");
 						options.push_back("hint_depth_texture");
+						options.push_back("hint_blit_source0");
+						options.push_back("hint_blit_source1");
+						options.push_back("hint_blit_source2");
+						options.push_back("hint_blit_source3");
 						options.push_back("source_color");
 					}
 				}

@@ -32,14 +32,15 @@
 
 #ifdef GLES3_ENABLED
 
-#include "platform_gl.h"
-#include "render_scene_buffers_gles3.h"
-
 #include "core/templates/local_vector.h"
 #include "core/templates/rid_owner.h"
 #include "drivers/gles3/storage/texture_storage.h"
 #include "servers/rendering/storage/light_storage.h"
 #include "servers/rendering/storage/utilities.h"
+
+#include "platform_gl.h"
+
+class RenderSceneBuffersGLES3;
 
 namespace GLES3 {
 
@@ -113,7 +114,6 @@ struct LightInstance {
 
 struct ReflectionProbe {
 	RS::ReflectionProbeUpdateMode update_mode = RS::REFLECTION_PROBE_UPDATE_ONCE;
-	int resolution = 256;
 	float intensity = 1.0;
 	float blend_distance = 1.0;
 	RS::ReflectionProbeAmbientMode ambient_mode = RS::REFLECTION_PROBE_AMBIENT_ENVIRONMENT;
@@ -688,6 +688,7 @@ public:
 	virtual bool reflection_probe_instance_needs_redraw(RID p_instance) override;
 	virtual bool reflection_probe_instance_has_reflection(RID p_instance) override;
 	virtual bool reflection_probe_instance_begin_render(RID p_instance, RID p_reflection_atlas) override;
+	virtual bool reflection_probe_instance_end_render(RID p_instance, RID p_reflection_atlas) override;
 	virtual Ref<RenderSceneBuffers> reflection_probe_atlas_get_render_buffers(RID p_reflection_atlas) override;
 	virtual bool reflection_probe_instance_postprocess_step(RID p_instance) override;
 

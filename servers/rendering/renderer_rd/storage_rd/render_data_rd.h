@@ -39,11 +39,11 @@ class RenderDataRD : public RenderData {
 
 public:
 	// Access methods to expose data externally
-	virtual Ref<RenderSceneBuffers> get_render_scene_buffers() const override;
-	virtual RenderSceneData *get_render_scene_data() const override;
+	virtual Ref<RenderSceneBuffers> get_render_scene_buffers() const override { return render_buffers; }
+	virtual RenderSceneData *get_render_scene_data() const override { return scene_data; }
 
-	virtual RID get_environment() const override;
-	virtual RID get_camera_attributes() const override;
+	virtual RID get_environment() const override { return environment; }
+	virtual RID get_camera_attributes() const override { return camera_attributes; }
 
 	// Members are publicly accessible within the render engine.
 	Ref<RenderSceneBuffersRD> render_buffers;
@@ -73,6 +73,8 @@ public:
 	bool directional_light_soft_shadows = false;
 
 	bool lightmap_bicubic_filter = false;
+
+	float window_output_max_value = 1.0;
 
 	RenderingMethod::RenderInfo *render_info = nullptr;
 

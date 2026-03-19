@@ -34,7 +34,9 @@
 
 @class CAContext;
 @class CALayer;
+class InputEvent;
 class GLManagerEmbedded;
+class NativeMenu;
 class RenderingContextDriver;
 class RenderingDevice;
 
@@ -114,6 +116,8 @@ public:
 	static DisplayServer *create_func(const String &p_rendering_driver, WindowMode p_mode, DisplayServer::VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i *p_position, const Vector2i &p_resolution, int p_screen, Context p_context, int64_t p_parent_window, Error &r_error);
 	static Vector<String> get_rendering_drivers_func();
 
+	void _window_set_size(const Size2i p_size, WindowID p_window = MAIN_WINDOW_ID);
+
 	// MARK: - Events
 
 	virtual void process_events() override;
@@ -143,11 +147,6 @@ public:
 	virtual void warp_mouse(const Point2i &p_position) override;
 	virtual Point2i mouse_get_position() const override;
 	virtual BitField<MouseButtonMask> mouse_get_button_state() const override;
-
-	// MARK: - Joystick
-
-	void joy_add(int p_idx, const String &p_name);
-	void joy_del(int p_idx);
 
 	// MARK: - Window
 
@@ -200,6 +199,8 @@ public:
 	virtual bool window_get_flag(WindowFlags p_flag, WindowID p_window = MAIN_WINDOW_ID) const override;
 
 	virtual void window_request_attention(WindowID p_window = MAIN_WINDOW_ID) override;
+	virtual void window_set_taskbar_progress_value(float p_value, WindowID p_window = MAIN_WINDOW_ID) override;
+	virtual void window_set_taskbar_progress_state(ProgressState p_state, WindowID p_window = MAIN_WINDOW_ID) override;
 	virtual void window_move_to_foreground(WindowID p_window = MAIN_WINDOW_ID) override;
 	virtual bool window_is_focused(WindowID p_window = MAIN_WINDOW_ID) const override;
 

@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "servers/physics_server_3d.h"
+#include "servers/physics_3d/physics_server_3d.h"
 
 #include "Jolt/Jolt.h"
 
@@ -127,7 +127,7 @@ public:
 	JoltPhysicsDirectSpaceState3D *get_direct_state();
 
 	JoltArea3D *get_default_area() const { return default_area; }
-	void set_default_area(JoltArea3D *p_area);
+	void set_default_area(JoltArea3D *p_area) { default_area = p_area; }
 
 	float get_last_step() const { return last_step; }
 

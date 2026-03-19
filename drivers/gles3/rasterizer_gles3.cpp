@@ -29,7 +29,6 @@
 /**************************************************************************/
 
 #include "rasterizer_gles3.h"
-#include "storage/utilities.h"
 
 #ifdef GLES3_ENABLED
 
@@ -37,7 +36,6 @@
 #include "core/io/dir_access.h"
 #include "core/io/image.h"
 #include "core/os/os.h"
-#include "storage/texture_storage.h"
 
 #define _EXT_DEBUG_OUTPUT_SYNCHRONOUS_ARB 0x8242
 #define _EXT_DEBUG_NEXT_LOGGED_MESSAGE_LENGTH_ARB 0x8243
@@ -92,8 +90,6 @@
 bool RasterizerGLES3::screen_flipped_y = false;
 #endif
 
-bool RasterizerGLES3::gles_over_gl = true;
-
 void RasterizerGLES3::begin_frame(double frame_step) {
 	frame++;
 	delta = frame_step;
@@ -123,23 +119,6 @@ void RasterizerGLES3::gl_end_frame(bool p_swap_buffers) {
 	} else {
 		glFinish();
 	}
-}
-
-void RasterizerGLES3::clear_depth(float p_depth) {
-#ifdef GL_API_ENABLED
-	if (is_gles_over_gl()) {
-		glClearDepth(p_depth);
-	}
-#endif // GL_API_ENABLED
-#ifdef GLES_API_ENABLED
-	if (!is_gles_over_gl()) {
-		glClearDepthf(p_depth);
-	}
-#endif // GLES_API_ENABLED
-}
-
-void RasterizerGLES3::clear_stencil(int32_t p_stencil) {
-	glClearStencil(p_stencil);
 }
 
 #ifdef CAN_DEBUG
@@ -210,6 +189,8 @@ void RasterizerGLES3::initialize() {
 }
 
 void RasterizerGLES3::finalize() {
+	// Has to be a separate call due to TextureStorage & MaterialStorage needing to interact for TexBlit Shaders
+	texture_storage->_tex_blit_shader_free();
 	memdelete(scene);
 	memdelete(canvas);
 	memdelete(gi);
@@ -253,7 +234,7 @@ RasterizerGLES3::RasterizerGLES3() {
 	bool has_egl = (eglGetProcAddress != nullptr);
 #endif
 
-	if (gles_over_gl) {
+	if (RasterizerUtilGLES3::is_gles_over_gl()) {
 		if (has_egl && !glad_loaded && gladLoadGL((GLADloadfunc)&_egl_load_function_wrapper)) {
 			glad_loaded = true;
 		}
@@ -264,7 +245,7 @@ RasterizerGLES3::RasterizerGLES3() {
 	}
 #endif // EGL_ENABLED
 
-	if (gles_over_gl) {
+	if (RasterizerUtilGLES3::is_gles_over_gl()) {
 		if (!glad_loaded && gladLoaderLoadGL()) {
 			glad_loaded = true;
 		}
@@ -279,7 +260,7 @@ RasterizerGLES3::RasterizerGLES3() {
 	// or we need to actually test for this situation before constructing this.
 	ERR_FAIL_COND_MSG(!glad_loaded, "Error initializing GLAD.");
 
-	if (gles_over_gl) {
+	if (RasterizerUtilGLES3::is_gles_over_gl()) {
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			if (GLAD_GL_ARB_debug_output) {
 				glEnable(_EXT_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
@@ -295,7 +276,7 @@ RasterizerGLES3::RasterizerGLES3() {
 	// For debugging
 #ifdef CAN_DEBUG
 #ifdef GL_API_ENABLED
-	if (gles_over_gl) {
+	if (RasterizerUtilGLES3::is_gles_over_gl()) {
 		if (OS::get_singleton()->is_stdout_verbose() && GLAD_GL_ARB_debug_output) {
 			glDebugMessageControlARB(_EXT_DEBUG_SOURCE_API_ARB, _EXT_DEBUG_TYPE_ERROR_ARB, _EXT_DEBUG_SEVERITY_HIGH_ARB, 0, nullptr, GL_TRUE);
 			glDebugMessageControlARB(_EXT_DEBUG_SOURCE_API_ARB, _EXT_DEBUG_TYPE_DEPRECATED_BEHAVIOR_ARB, _EXT_DEBUG_SEVERITY_HIGH_ARB, 0, nullptr, GL_TRUE);
@@ -307,7 +288,7 @@ RasterizerGLES3::RasterizerGLES3() {
 	}
 #endif // GL_API_ENABLED
 #ifdef GLES_API_ENABLED
-	if (!gles_over_gl) {
+	if (!RasterizerUtilGLES3::is_gles_over_gl()) {
 		if (OS::get_singleton()->is_stdout_verbose()) {
 			DebugMessageCallbackARB callback = (DebugMessageCallbackARB)eglGetProcAddress("glDebugMessageCallback");
 			if (!callback) {
@@ -372,6 +353,8 @@ RasterizerGLES3::RasterizerGLES3() {
 	fog = memnew(GLES3::Fog);
 	canvas = memnew(RasterizerCanvasGLES3());
 	scene = memnew(RasterizerSceneGLES3());
+	// Has to be a separate call due to TextureStorage & MaterialStorage needing to interact for TexBlit Shaders
+	texture_storage->_tex_blit_shader_initialize();
 
 	// Disable OpenGL linear to sRGB conversion, because Godot will always do this conversion itself.
 	if (config->srgb_framebuffer_supported) {
@@ -410,7 +393,7 @@ void RasterizerGLES3::_blit_render_target_to_screen(DisplayServer::WindowID p_sc
 	}
 #endif
 
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
 
 	if (p_first) {
 		if (p_blit.dst_rect.position != Vector2() || p_blit.dst_rect.size != rt->size) {
@@ -463,7 +446,7 @@ void RasterizerGLES3::blit_render_targets_to_screen(DisplayServer::WindowID p_sc
 	}
 }
 
-void RasterizerGLES3::set_boot_image(const Ref<Image> &p_image, const Color &p_color, bool p_scale, bool p_use_filter) {
+void RasterizerGLES3::set_boot_image_with_stretch(const Ref<Image> &p_image, const Color &p_color, RenderingServer::SplashStretchMode p_stretch_mode, bool p_use_filter) {
 	if (p_image.is_null() || p_image->is_empty()) {
 		return;
 	}
@@ -481,25 +464,7 @@ void RasterizerGLES3::set_boot_image(const Ref<Image> &p_image, const Color &p_c
 	RID texture = texture_storage->texture_allocate();
 	texture_storage->texture_2d_initialize(texture, p_image);
 
-	Rect2 imgrect(0, 0, p_image->get_width(), p_image->get_height());
-	Rect2 screenrect;
-	if (p_scale) {
-		if (win_size.width > win_size.height) {
-			//scale horizontally
-			screenrect.size.y = win_size.height;
-			screenrect.size.x = imgrect.size.x * win_size.height / imgrect.size.y;
-			screenrect.position.x = (win_size.width - screenrect.size.x) / 2;
-
-		} else {
-			//scale vertically
-			screenrect.size.x = win_size.width;
-			screenrect.size.y = imgrect.size.y * win_size.width / imgrect.size.x;
-			screenrect.position.y = (win_size.height - screenrect.size.y) / 2;
-		}
-	} else {
-		screenrect = imgrect;
-		screenrect.position += ((Size2(win_size.width, win_size.height) - screenrect.size) / 2.0).floor();
-	}
+	Rect2 screenrect = RenderingServer::get_splash_stretched_screen_rect(p_image->get_size(), win_size, p_stretch_mode);
 
 #ifdef WINDOWS_ENABLED
 	if (!screen_flipped_y)

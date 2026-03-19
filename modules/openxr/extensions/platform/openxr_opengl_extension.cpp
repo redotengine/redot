@@ -36,8 +36,8 @@
 
 #include "drivers/gles3/effects/copy_effects.h"
 #include "drivers/gles3/storage/texture_storage.h"
+#include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
-#include "servers/rendering_server.h"
 
 // OpenXR requires us to submit sRGB textures so that it recognizes the content
 // as being in sRGB color space. We do fall back on "normal" textures but this
@@ -56,7 +56,7 @@
 // feature off.
 // See: https://registry.khronos.org/OpenGL/extensions/EXT/EXT_sRGB_write_control.txt
 
-HashMap<String, bool *> OpenXROpenGLExtension::get_requested_extensions() {
+HashMap<String, bool *> OpenXROpenGLExtension::get_requested_extensions(XrVersion p_version) {
 	HashMap<String, bool *> request_extensions;
 
 #ifdef ANDROID_ENABLED
@@ -191,14 +191,14 @@ void *OpenXROpenGLExtension::set_session_create_and_get_next_pointer(void *p_nex
 	void *display_handle = (void *)display_server->window_get_native_handle(DisplayServer::DISPLAY_HANDLE);
 	void *glxcontext_handle = (void *)display_server->window_get_native_handle(DisplayServer::OPENGL_CONTEXT);
 	void *glxdrawable_handle = (void *)display_server->window_get_native_handle(DisplayServer::WINDOW_HANDLE);
+	void *glx_fbconfig_handle = (void *)display_server->window_get_native_handle(DisplayServer::GLX_FBCONFIG);
+	VisualID glx_visualid = (VisualID)display_server->window_get_native_handle(DisplayServer::GLX_VISUALID);
 
 	graphics_binding_gl.xDisplay = (Display *)display_handle;
 	graphics_binding_gl.glxContext = (GLXContext)glxcontext_handle;
 	graphics_binding_gl.glxDrawable = (GLXDrawable)glxdrawable_handle;
-
-	// spec says to use proper values but runtimes don't care
-	graphics_binding_gl.visualid = 0;
-	graphics_binding_gl.glxFBConfig = nullptr;
+	graphics_binding_gl.glxFBConfig = (GLXFBConfig)glx_fbconfig_handle;
+	graphics_binding_gl.visualid = glx_visualid;
 #endif
 #endif
 
@@ -288,7 +288,7 @@ bool OpenXROpenGLExtension::get_swapchain_image_data(XrSwapchain p_swapchain, in
 
 bool OpenXROpenGLExtension::create_projection_fov(const XrFovf p_fov, double p_z_near, double p_z_far, Projection &r_camera_matrix) {
 	OpenXRUtil::XrMatrix4x4f matrix;
-	OpenXRUtil::XrMatrix4x4f_CreateProjectionFov(&matrix, OpenXRUtil::GRAPHICS_OPENGL, p_fov, (float)p_z_near, (float)p_z_far);
+	OpenXRUtil::XrMatrix4x4f_CreateProjectionFov(&matrix, p_fov, (float)p_z_near, (float)p_z_far);
 
 	for (int j = 0; j < 4; j++) {
 		for (int i = 0; i < 4; i++) {
@@ -327,8 +327,8 @@ void OpenXROpenGLExtension::cleanup_swapchain_graphics_data(void **p_swapchain_g
 }
 
 #define ENUM_TO_STRING_CASE(e) \
-	case e: {                  \
-		return String(#e);     \
+	case e: { \
+		return String(#e); \
 	} break;
 
 String OpenXROpenGLExtension::get_swapchain_format_name(int64_t p_swapchain_format) const {

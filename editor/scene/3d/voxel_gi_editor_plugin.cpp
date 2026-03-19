@@ -30,6 +30,8 @@
 
 #include "voxel_gi_editor_plugin.h"
 
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "editor/editor_interface.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
@@ -44,7 +46,6 @@ void VoxelGIEditorPlugin::_bake() {
 			if (path.is_empty()) {
 				path = "res://" + voxel_gi->get_name() + "_data.res";
 			} else {
-				String ext = path.get_extension();
 				path = path.get_basename() + "." + voxel_gi->get_name() + "_data.res";
 			}
 			probe_file->set_current_path(path);

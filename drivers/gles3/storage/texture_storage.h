@@ -32,22 +32,21 @@
 
 #ifdef GLES3_ENABLED
 
-#include "platform_gl.h"
-
-#include "config.h"
 #include "core/io/image.h"
-#include "core/os/os.h"
+#include "core/templates/rb_map.h"
 #include "core/templates/rid_owner.h"
-#include "servers/rendering/renderer_compositor.h"
+#include "drivers/gles3/shaders/canvas_sdf.glsl.gen.h"
+#include "drivers/gles3/storage/config.h"
 #include "servers/rendering/storage/texture_storage.h"
 
-#include "drivers/gles3/shaders/canvas_sdf.glsl.gen.h"
+#include "platform_gl.h"
 
 namespace GLES3 {
 
 #define _GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
 #define _GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
 
+#define _EXT_COMPRESSED_RGB_S3TC_DXT1_EXT 0x83F0
 #define _EXT_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1
 #define _EXT_COMPRESSED_RGBA_S3TC_DXT3_EXT 0x83F2
 #define _EXT_COMPRESSED_RGBA_S3TC_DXT5_EXT 0x83F3
@@ -112,6 +111,11 @@ namespace GLES3 {
 
 #define _EXT_TEXTURE_CUBE_MAP_SEAMLESS 0x884F
 
+#define _EXT_R16 0x822A
+#define _EXT_RG16 0x822C
+#define _EXT_RGB16 0x8054
+#define _EXT_RGBA16 0x805B
+
 enum DefaultGLTexture {
 	DEFAULT_GL_TEXTURE_WHITE,
 	DEFAULT_GL_TEXTURE_BLACK,
@@ -122,9 +126,13 @@ enum DefaultGLTexture {
 	DEFAULT_GL_TEXTURE_CUBEMAP_BLACK,
 	//DEFAULT_GL_TEXTURE_CUBEMAP_ARRAY_BLACK, // Cubemap Arrays not supported in GL 3.3 or GL ES 3.0
 	DEFAULT_GL_TEXTURE_CUBEMAP_WHITE,
+	DEFAULT_GL_TEXTURE_CUBEMAP_TRANSPARENT,
 	DEFAULT_GL_TEXTURE_3D_WHITE,
 	DEFAULT_GL_TEXTURE_3D_BLACK,
+	DEFAULT_GL_TEXTURE_3D_TRANSPARENT,
 	DEFAULT_GL_TEXTURE_2D_ARRAY_WHITE,
+	DEFAULT_GL_TEXTURE_2D_ARRAY_BLACK,
+	DEFAULT_GL_TEXTURE_2D_ARRAY_TRANSPARENT,
 	DEFAULT_GL_TEXTURE_2D_UINT,
 	DEFAULT_GL_TEXTURE_EXT,
 	DEFAULT_GL_TEXTURE_MAX
@@ -151,7 +159,7 @@ struct Texture {
 	bool is_render_target = false;
 
 	RID proxy_to;
-	Vector<RID> proxies;
+	LocalVector<RID> proxies;
 
 	String path;
 	int width = 0;
@@ -172,6 +180,7 @@ struct Texture {
 
 	Type type = TYPE_2D;
 	RS::TextureLayeredType layered_type = RS::TEXTURE_LAYERED_2D_ARRAY;
+	RS::TextureDrawableFormat drawable_type = RS::TEXTURE_DRAWABLE_FORMAT_RGBA8;
 
 	GLenum target = GL_TEXTURE_2D;
 	GLenum gl_format_cache = 0;
@@ -270,10 +279,10 @@ struct Texture {
 					max_lod = 0;
 				} else if (config->use_nearest_mip_filter) {
 					pmin = GL_NEAREST_MIPMAP_NEAREST;
-					max_lod = 1000;
+					max_lod = mipmaps - 1;
 				} else {
 					pmin = GL_NEAREST_MIPMAP_LINEAR;
-					max_lod = 1000;
+					max_lod = mipmaps - 1;
 				}
 			} break;
 			case RS::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC: {
@@ -287,10 +296,10 @@ struct Texture {
 					max_lod = 0;
 				} else if (config->use_nearest_mip_filter) {
 					pmin = GL_LINEAR_MIPMAP_NEAREST;
-					max_lod = 1000;
+					max_lod = mipmaps - 1;
 				} else {
 					pmin = GL_LINEAR_MIPMAP_LINEAR;
-					max_lod = 1000;
+					max_lod = mipmaps - 1;
 				}
 			} break;
 			default: {
@@ -349,6 +358,8 @@ struct RenderTarget {
 	GLuint backbuffer_depth = 0;
 	bool depth_has_stencil = true;
 
+	Size2i velocity_target_size;
+
 	bool hdr = false; // For Compatibility this effects both 2D and 3D rendering!
 	GLuint color_internal_format = GL_RGBA8;
 	GLuint color_format = GL_RGBA;
@@ -380,6 +391,7 @@ struct RenderTarget {
 		RID color;
 		RID depth;
 		RID velocity;
+		RID velocity_depth;
 
 		struct FBOCacheEntry {
 			GLuint fbo;
@@ -390,6 +402,9 @@ struct RenderTarget {
 			bool depth_has_stencil;
 		};
 		RBMap<uint32_t, FBOCacheEntry> fbo_cache;
+
+		GLuint velocity_fbo = 0;
+		RBMap<uint32_t, GLuint> velocity_fbo_cache;
 	} overridden;
 
 	RID texture;
@@ -454,7 +469,8 @@ private:
 	mutable RID_Owner<RenderTarget> render_target_owner;
 
 	void _clear_render_target(RenderTarget *rt);
-	void _update_render_target(RenderTarget *rt);
+	void _update_render_target_color(RenderTarget *rt);
+	void _update_render_target_velocity(RenderTarget *rt);
 	void _create_render_target_backbuffer(RenderTarget *rt);
 	void _render_target_allocate_sdf(RenderTarget *rt);
 	void _render_target_clear_sdf(RenderTarget *rt);
@@ -470,8 +486,24 @@ private:
 		RID shader_version;
 	} sdf_shader;
 
+	/* Texture Blit Shader API */
+
+	struct TexBlitShader {
+		bool initialized = false;
+		RID default_shader;
+		RID default_material;
+		RID default_shader_version;
+	} tex_blit_shader;
+
+	GLuint tex_blit_fbo;
+	GLuint tex_blit_quad;
+	GLuint tex_blit_quad_array;
+
 public:
 	static TextureStorage *get_singleton();
+
+	void _tex_blit_shader_initialize();
+	void _tex_blit_shader_free();
 
 	TextureStorage();
 	virtual ~TextureStorage();
@@ -518,6 +550,7 @@ public:
 	virtual void texture_3d_initialize(RID p_texture, Image::Format, int p_width, int p_height, int p_depth, bool p_mipmaps, const Vector<Ref<Image>> &p_data) override;
 	virtual void texture_external_initialize(RID p_texture, int p_width, int p_height, uint64_t p_external_buffer) override;
 	virtual void texture_proxy_initialize(RID p_texture, RID p_base) override; //all slices, then all the mipmaps, must be coherent
+	virtual void texture_drawable_initialize(RID p_texture, int p_width, int p_height, RS::TextureDrawableFormat p_format, const Color &p_color, bool p_with_mipmaps) override;
 
 	virtual RID texture_create_from_native_handle(RS::TextureType p_type, Image::Format p_format, uint64_t p_native_handle, int p_width, int p_height, int p_depth, int p_layers = 1, RS::TextureLayeredType p_layered_type = RS::TEXTURE_LAYERED_2D_ARRAY) override;
 
@@ -525,6 +558,9 @@ public:
 	virtual void texture_3d_update(RID p_texture, const Vector<Ref<Image>> &p_data) override;
 	virtual void texture_external_update(RID p_texture, int p_width, int p_height, uint64_t p_external_buffer) override;
 	virtual void texture_proxy_update(RID p_proxy, RID p_base) override;
+	void texture_remap_proxies(RID p_from_texture, RID p_to_texture);
+
+	virtual void texture_drawable_blit_rect(const TypedArray<RID> &p_textures, const Rect2i &p_rect, RID p_material, const Color &p_modulate, const TypedArray<RID> &p_source_textures, int p_to_mipmap) override;
 
 	Ref<Image> texture_2d_placeholder;
 	Vector<Ref<Image>> texture_2d_array_placeholder;
@@ -539,6 +575,9 @@ public:
 	virtual Ref<Image> texture_2d_get(RID p_texture) const override;
 	virtual Ref<Image> texture_2d_layer_get(RID p_texture, int p_layer) const override;
 	virtual Vector<Ref<Image>> texture_3d_get(RID p_texture) const override;
+
+	virtual void texture_drawable_generate_mipmaps(RID p_texture) override;
+	virtual RID texture_drawable_get_default_material() const override;
 
 	virtual void texture_replace(RID p_texture, RID p_by_texture) override;
 	virtual void texture_set_size_override(RID p_texture, int p_width, int p_height) override;
@@ -625,8 +664,6 @@ public:
 	RenderTarget *get_render_target(RID p_rid) { return render_target_owner.get_or_null(p_rid); }
 	bool owns_render_target(RID p_rid) { return render_target_owner.owns(p_rid); }
 
-	void check_backbuffer(RenderTarget *rt, const bool uses_screen_texture, const bool uses_depth_texture);
-
 	virtual RID render_target_create() override;
 	virtual void render_target_free(RID p_rid) override;
 
@@ -696,15 +733,15 @@ public:
 	virtual RID render_target_get_override_color(RID p_render_target) const override;
 	virtual RID render_target_get_override_depth(RID p_render_target) const override;
 	virtual RID render_target_get_override_velocity(RID p_render_target) const override;
-	virtual RID render_target_get_override_velocity_depth(RID p_render_target) const override { return RID(); }
+	virtual RID render_target_get_override_velocity_depth(RID p_render_target) const override;
 
 	virtual void render_target_set_render_region(RID p_render_target, const Rect2i &p_render_region) override;
 	virtual Rect2i render_target_get_render_region(RID p_render_target) const override;
 
 	virtual RID render_target_get_texture(RID p_render_target) override;
 
-	virtual void render_target_set_velocity_target_size(RID p_render_target, const Size2i &p_target_size) override {}
-	virtual Size2i render_target_get_velocity_target_size(RID p_render_target) const override { return Size2i(); }
+	virtual void render_target_set_velocity_target_size(RID p_render_target, const Size2i &p_target_size) override;
+	virtual Size2i render_target_get_velocity_target_size(RID p_render_target) const override;
 
 	void bind_framebuffer(GLuint framebuffer) {
 		glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);

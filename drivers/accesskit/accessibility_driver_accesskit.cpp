@@ -33,9 +33,10 @@
 #include "accessibility_driver_accesskit.h"
 
 #include "core/config/project_settings.h"
+#include "core/io/file_access.h"
 #include "core/version.h"
 
-#include "servers/text_server.h"
+#include "servers/text/text_server.h"
 
 AccessibilityDriverAccessKit *AccessibilityDriverAccessKit::singleton = nullptr;
 
@@ -72,6 +73,7 @@ bool AccessibilityDriverAccessKit::window_create(DisplayServer::WindowID p_windo
 #ifdef LINUXBSD_ENABLED
 	wd.adapter = accesskit_unix_adapter_new(&_accessibility_initial_tree_update_callback, (void *)(size_t)p_window_id, &_accessibility_action_callback, (void *)(size_t)p_window_id, &_accessibility_deactivation_callback, (void *)(size_t)p_window_id);
 #endif
+	print_verbose(vformat("Accessibility: window %d adapter created.", p_window_id));
 
 	if (wd.adapter == nullptr) {
 		memdelete(ae);
@@ -88,6 +90,8 @@ void AccessibilityDriverAccessKit::window_destroy(DisplayServer::WindowID p_wind
 	WindowData *wd = windows.getptr(p_window_id);
 	ERR_FAIL_NULL(wd);
 
+	print_verbose(vformat("Accessibility: window %d adapter destroyed.", p_window_id));
+
 #ifdef WINDOWS_ENABLED
 	accesskit_windows_subclassing_adapter_free(wd->adapter);
 #endif
@@ -103,7 +107,22 @@ void AccessibilityDriverAccessKit::window_destroy(DisplayServer::WindowID p_wind
 }
 
 void AccessibilityDriverAccessKit::_accessibility_deactivation_callback(void *p_user_data) {
-	// NOP
+	DisplayServer::WindowID window_id = (DisplayServer::WindowID)(size_t)p_user_data;
+	WindowData *wd = singleton->windows.getptr(window_id);
+	ERR_FAIL_NULL(wd);
+
+	print_verbose(vformat("Accessibility: window %d adapter deactivated.", window_id));
+
+	if (singleton->focus.is_valid()) {
+		AccessibilityElement *ae = singleton->rid_owner.get_or_null(singleton->focus);
+		if (ae && ae->window_id == window_id) {
+			singleton->focus = RID();
+		}
+	}
+	if (wd->deactivate.is_valid()) {
+		wd->deactivate.call_deferred(); // Should be called on main thread only.
+	}
+	wd->update.clear();
 }
 
 void AccessibilityDriverAccessKit::_accessibility_action_callback(struct accesskit_action_request *p_request, void *p_user_data) {
@@ -214,7 +233,56 @@ accesskit_tree_update *AccessibilityDriverAccessKit::_accessibility_initial_tree
 	accesskit_tree_update_set_tree(tree_update, accesskit_tree_new(win_id));
 	accesskit_tree_update_push_node(tree_update, win_id, win_node);
 
+	print_verbose(vformat("Accessibility: window %d adapter activated.", window_id));
+
+	if (wd->activate.is_valid()) {
+		wd->activate.call_deferred(); // Should be called on main thread only.
+	}
+
 	return tree_update;
+}
+
+void AccessibilityDriverAccessKit::accessibility_set_window_callbacks(DisplayServer::WindowID p_window_id, const Callable &p_activate_callable, const Callable &p_deativate_callable) {
+	WindowData *wd = singleton->windows.getptr(p_window_id);
+	ERR_FAIL_NULL(wd);
+
+	wd->activate = p_activate_callable;
+	wd->deactivate = p_deativate_callable;
+}
+
+void AccessibilityDriverAccessKit::accessibility_window_activation_completed(DisplayServer::WindowID p_window_id) {
+	WindowData *wd = singleton->windows.getptr(p_window_id);
+	if (!wd) {
+		return;
+	}
+
+	print_verbose(vformat("Accessibility: window %d adapter initial update completed.", p_window_id));
+
+	wd->initial_update_completed = true;
+}
+
+void AccessibilityDriverAccessKit::accessibility_window_deactivation_completed(DisplayServer::WindowID p_window_id) {
+	WindowData *wd = singleton->windows.getptr(p_window_id);
+	if (!wd) {
+		return;
+	}
+
+	print_verbose(vformat("Accessibility: window %d adapter deactivation completed.", p_window_id));
+
+#ifdef DEV_ENABLED
+	LocalVector<RID> to_delete;
+	for (const RID &rid : rid_owner.get_owned_list()) {
+		AccessibilityElement *ae = rid_owner.get_or_null(rid);
+		if (rid != wd->root_id && ae && ae->window_id == p_window_id) {
+			ERR_PRINT(vformat("Accessibility/BUG: Accessibility element %d was not deleted on window %d adapter deactivation.", rid.get_id(), p_window_id));
+			to_delete.push_back(rid);
+		}
+	}
+	for (const RID &rid : to_delete) {
+		_free_recursive(wd, rid);
+	}
+#endif
+	wd->initial_update_completed = false;
 }
 
 RID AccessibilityDriverAccessKit::accessibility_create_element(DisplayServer::WindowID p_window_id, DisplayServer::AccessibilityRole p_role) {
@@ -249,7 +317,7 @@ RID AccessibilityDriverAccessKit::accessibility_create_sub_element(const RID &p_
 	return rid;
 }
 
-RID AccessibilityDriverAccessKit::accessibility_create_sub_text_edit_elements(const RID &p_parent_rid, const RID &p_shaped_text, float p_min_height, int p_insert_pos) {
+RID AccessibilityDriverAccessKit::accessibility_create_sub_text_edit_elements(const RID &p_parent_rid, const RID &p_shaped_text, float p_min_height, int p_insert_pos, bool p_is_last_line) {
 	AccessibilityElement *parent_ae = rid_owner.get_or_null(p_parent_rid);
 	ERR_FAIL_NULL_V(parent_ae, RID());
 
@@ -420,7 +488,7 @@ RID AccessibilityDriverAccessKit::accessibility_create_sub_text_edit_elements(co
 
 		run_off_x += size_x;
 	}
-	{
+	if (!p_is_last_line || text_elements.is_empty()) {
 		// Add "\n" at the end.
 		AccessibilityElement *ae = memnew(AccessibilityElement);
 		ae->role = ACCESSKIT_ROLE_TEXT_RUN;
@@ -431,18 +499,22 @@ RID AccessibilityDriverAccessKit::accessibility_create_sub_text_edit_elements(co
 
 		text_elements.push_back(ae);
 
-		Vector<uint8_t> char_lengths;
-		char_lengths.push_back(1);
-		accesskit_node_set_value(ae->node, "\n");
-		accesskit_node_set_character_lengths(ae->node, char_lengths.size(), char_lengths.ptr());
+		if (!p_is_last_line) {
+			accesskit_node_set_value(ae->node, "\n");
 
-		Vector<float> char_positions;
-		Vector<float> char_widths;
-		char_positions.push_back(0.0);
-		char_widths.push_back(1.0);
+			Vector<uint8_t> char_lengths;
+			Vector<float> char_positions;
+			Vector<float> char_widths;
+			char_lengths.push_back(1);
+			char_positions.push_back(0.0);
+			char_widths.push_back(1.0);
 
-		accesskit_node_set_character_positions(ae->node, char_positions.size(), char_positions.ptr());
-		accesskit_node_set_character_widths(ae->node, char_widths.size(), char_widths.ptr());
+			accesskit_node_set_character_lengths(ae->node, char_lengths.size(), char_lengths.ptr());
+			accesskit_node_set_character_positions(ae->node, char_positions.size(), char_positions.ptr());
+			accesskit_node_set_character_widths(ae->node, char_widths.size(), char_widths.ptr());
+		} else {
+			accesskit_node_set_value(ae->node, "");
+		}
 		accesskit_node_set_text_direction(ae->node, ACCESSKIT_TEXT_DIRECTION_LEFT_TO_RIGHT);
 
 		accesskit_rect rect;
@@ -460,10 +532,18 @@ RID AccessibilityDriverAccessKit::accessibility_create_sub_text_edit_elements(co
 		}
 	};
 	text_elements.sort_custom<RunCompare>();
-	for (AccessibilityElement *text_element : text_elements) {
-		RID rid = rid_owner.make_rid(text_element);
+	for (int i = 0; i < text_elements.size(); i++) {
+		RID rid = rid_owner.make_rid(text_elements[i]);
 		root_ae->children.push_back(rid);
 		wd->update.insert(rid);
+
+		// Link adjacent TextRuns on the same line.
+		if (i > 0) {
+			RID prev_rid = root_ae->children[i - 1];
+			AccessibilityElement *prev_ae = rid_owner.get_or_null(prev_rid);
+			accesskit_node_set_previous_on_line(text_elements[i]->node, (accesskit_node_id)prev_rid.get_id());
+			accesskit_node_set_next_on_line(prev_ae->node, (accesskit_node_id)rid.get_id());
+		}
 	}
 
 	return root_rid;
@@ -599,6 +679,13 @@ _FORCE_INLINE_ void AccessibilityDriverAccessKit::_ensure_node(const RID &p_id, 
 
 		wd->update.insert(p_id);
 		p_ae->node = accesskit_node_new(p_ae->role);
+
+		// Re-apply stored name if any, so nodes recreated by _ensure_node
+		// retain their label even if the caller doesn't re-set all properties.
+		if (!p_ae->name.is_empty() || !p_ae->name_extra_info.is_empty()) {
+			String full_name = p_ae->name + " " + p_ae->name_extra_info;
+			accesskit_node_set_label(p_ae->node, full_name.utf8().ptr());
+		}
 	}
 }
 
@@ -955,11 +1042,13 @@ void AccessibilityDriverAccessKit::accessibility_update_add_custom_action(const 
 	_ensure_node(p_id, ae);
 
 	if (!p_action_description.is_empty()) {
-		accesskit_custom_action ca = accesskit_custom_action_new(p_action_id, p_action_description.utf8().ptr());
+		accesskit_custom_action *ca = accesskit_custom_action_new(p_action_id);
+		accesskit_custom_action_set_description(ca, p_action_description.utf8().ptr());
 		accesskit_node_push_custom_action(ae->node, ca);
 	} else {
 		String cs_name = vformat("Custom Action %d", p_action_id);
-		accesskit_custom_action ca = accesskit_custom_action_new(p_action_id, cs_name.utf8().ptr());
+		accesskit_custom_action *ca = accesskit_custom_action_new(p_action_id);
+		accesskit_custom_action_set_description(ca, cs_name.utf8().ptr());
 		accesskit_node_push_custom_action(ae->node, ca);
 	}
 }
@@ -1635,6 +1724,7 @@ AccessibilityDriverAccessKit::AccessibilityDriverAccessKit() {
 	role_map[DisplayServer::AccessibilityRole::ROLE_TITLE_BAR] = ACCESSKIT_ROLE_TITLE_BAR;
 	role_map[DisplayServer::AccessibilityRole::ROLE_DIALOG] = ACCESSKIT_ROLE_DIALOG;
 	role_map[DisplayServer::AccessibilityRole::ROLE_TOOLTIP] = ACCESSKIT_ROLE_TOOLTIP;
+	role_map[DisplayServer::AccessibilityRole::ROLE_REGION] = ACCESSKIT_ROLE_REGION;
 
 	action_map[DisplayServer::AccessibilityAction::ACTION_CLICK] = ACCESSKIT_ACTION_CLICK;
 	action_map[DisplayServer::AccessibilityAction::ACTION_FOCUS] = ACCESSKIT_ACTION_FOCUS;

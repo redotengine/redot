@@ -93,7 +93,6 @@ class EmbeddedProcessMacOS final : public EmbeddedProcessBase {
 
 	void _try_embed_process();
 	void update_embedded_process();
-	void _joy_connection_changed(int p_index, bool p_connected) const;
 
 protected:
 	void _notification(int p_what);
@@ -119,6 +118,7 @@ public:
 	void embed_process(OS::ProcessID p_pid) override;
 	int get_embedded_pid() const override { return current_process_id; }
 	void reset() override;
+	void reset_timers() override {}
 	void request_close() override;
 	void queue_update_embedded_process() override { update_embedded_process(); }
 

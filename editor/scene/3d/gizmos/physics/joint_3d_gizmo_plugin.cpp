@@ -37,6 +37,7 @@
 #include "scene/3d/physics/joints/hinge_joint_3d.h"
 #include "scene/3d/physics/joints/pin_joint_3d.h"
 #include "scene/3d/physics/joints/slider_joint_3d.h"
+#include "scene/main/timer.h"
 
 #define BODY_A_RADIUS 0.25
 #define BODY_B_RADIUS 0.27
@@ -654,12 +655,12 @@ void Joint3DGizmoPlugin::CreateGeneric6DOFJointGizmo(
 				break;
 		}
 
-#define ADD_VTX(x, y, z)                                         \
-	{                                                            \
-		Vector3 v;                                               \
-		v[a1] = (x);                                             \
-		v[a2] = (y);                                             \
-		v[a3] = (z);                                             \
+#define ADD_VTX(x, y, z) \
+	{ \
+		Vector3 v; \
+		v[a1] = (x); \
+		v[a2] = (y); \
+		v[a3] = (z); \
 		r_points.push_back(p_offset.translated_local(v).origin); \
 	}
 
